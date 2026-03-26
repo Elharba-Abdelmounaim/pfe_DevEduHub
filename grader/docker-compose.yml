@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  grader:
+    build: .
+    container_name: deveduhub_grader
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Sibling-container pattern: share Docker socket so grader
+      # can launch sandbox containers on the host Docker daemon
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
+    environment:
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
