@@ -1,6 +1,7 @@
 # DevEduHub — Technical Audit Report
 **Date:** 2025 | **Auditor:** Senior Engineer Review  
-**Codebase scope:** 48 PHP files · 5 Python files · 2 Docker files · 4 test files
+**Codebase scope:** 57 PHP files · 5 Python files · 2 Docker files · 4 test files  
+**Last updated:** Factories + Seeders added (Phase 1 testing now unblocked)
 
 ---
 
@@ -174,10 +175,14 @@ PATCH  /api/notifications/read-all    [auth]  ← Phase 2
 PATCH  /api/notifications/{id}/read   [auth]  ← Phase 2
 ```
 
+### ✅ Recently Added
+
+- **Model Factories (5)** — `UserFactory`, `CourseFactory`, `AssignmentFactory`, `EnrollmentFactory`, `SubmissionFactory` — all with states, UUID-aware, shared `$hashedPassword` for test performance
+- **Seeders (3)** — `DatabaseSeeder`, `DemoSeeder` (predictable credentials), `ExtraStudentsSeeder` (bulk realistic data)
+- **`StudentJourneyTest` updated** — all 20 test cases now use factories correctly
+
 ### ❌ Missing (Laravel)
 
-- **No Model Factories** — tests cannot use `User::factory()` without them
-- **No Seeders** — no demo data for development
 - **No `AssignmentPolicy`** — authorization checks are inline in controller (`abort_unless`) rather than policy classes
 - **No rate limiting** on `/grade` dispatch or submission store
 - **No `api.php` versioning** — no `/api/v1/` prefix
@@ -264,21 +269,21 @@ users ──< notifications (morphs)
 | Enrollment system | ✅ Complete | 95% |
 | Submission flow | ✅ Complete | 90% |
 | Laravel API Resources | ✅ Complete | 100% |
+| Model Factories + Seeders | ✅ Complete | 100% |
 | Python grader service | ✅ Complete | 90% |
 | Docker sandbox execution | ✅ Complete | 90% |
 | Laravel ↔ Python integration | ✅ Complete | 85% |
 | Queue + Redis async | ✅ Complete | 90% |
 | Notification system | ✅ Complete | 85% |
-| Feature tests | ✅ Complete | 75% |
+| Feature tests | ✅ Complete | 85% |
 | Frontend (React) | ❌ Not started | 0% |
 | Phase 3 tables/features | ❌ Not started | 0% |
 | DevOps / Docker for Laravel | ❌ Not started | 0% |
-| Model factories + seeders | ❌ Missing | 0% |
 
-**Overall backend progress: ~75%**  
-**Overall project progress: ~45%** (frontend is the largest missing block)
+**Overall backend progress: ~88%**  
+**Overall project progress: ~52%** (frontend is the largest missing block)
 
-**Current phase:** Phase 2 complete. Ready to begin Phase 3 or frontend.
+**Current phase:** Phase 2 complete + testing infrastructure done. Ready for frontend or Phase 3.
 
 ---
 
@@ -286,62 +291,60 @@ users ──< notifications (morphs)
 
 ### Critical
 1. **Frontend (React)** — zero UI code exists; this is the entire user-facing layer
-2. **Model Factories** — `StudentJourneyTest` calls `User::factory()` but no factory file exists; all tests will fail without them
-3. **`AssignmentPolicy`** — authorization is inline in controllers; should be extracted
+2. **`AssignmentPolicy`** — authorization is inline in controllers; should be extracted
 
 ### Important
-4. **Database indexes** — `submission_status`, `student_id` on submissions need indexes for query performance
-5. **Rate limiting** — no throttle on submission creation or retry endpoints
-6. **Laravel Dockerfile** — cannot containerise the backend for deployment
-7. **CI/CD** — no automated test runs on push
-8. **Password field alignment** — `password_hash` naming needs explicit `$authPasswordName` in `User` model (present but verify Sanctum token resolution works)
+3. **Database indexes** — `submission_status`, `student_id` on submissions need indexes for query performance
+4. **Rate limiting** — no throttle on submission creation or retry endpoints
+5. **Laravel Dockerfile** — cannot containerise the backend for deployment
+6. **CI/CD** — no automated test runs on push
+7. **Password field alignment** — `password_hash` naming needs explicit `$authPasswordName` in `User` model (present but verify Sanctum token resolution works)
 
 ### Nice to have
-9. **Seeders** — no demo data for local development or staging
-10. **API versioning** (`/api/v1/`) — no prefix, harder to evolve
-11. **Soft deletes** — hard cascade deletes lose audit history
-12. **Phase 3 migrations** — portfolios, projects, github_webhooks not migrated
-13. **GitHub webhook receiver** — no endpoint to auto-trigger grading on push
-14. **grader.py version pinning** — `grader_v2` vs `grader` duplication should be resolved
-15. **CORS restriction** — grader has `allow_origins=["*"]`, should be locked to Laravel origin
+8. **API versioning** (`/api/v1/`) — no prefix, harder to evolve
+9. **Soft deletes** — hard cascade deletes lose audit history
+10. **Phase 3 migrations** — portfolios, projects, github_webhooks not migrated
+11. **GitHub webhook receiver** — no endpoint to auto-trigger grading on push
+12. **grader.py version pinning** — `grader_v2` vs `grader` duplication should be resolved
+13. **CORS restriction** — grader has `allow_origins=["*"]`, should be locked to Laravel origin
 
 ---
 
 ## 10. Next Steps (Prioritized)
 
-### Priority 1 — Unblock testing (1–2 days)
+### ✅ Priority 1 — DONE: Testing infrastructure
 ```
-1. Create Model Factories:
-   - UserFactory (role: teacher/student)
-   - CourseFactory
-   - AssignmentFactory (with/without test_cases)
-   - SubmissionFactory
-
-2. Create Seeders:
-   - DatabaseSeeder → runs all seeders
-   - Demo teacher + 2 students + 1 course + 2 assignments
+✓ UserFactory     — teacher(), student(), unverified(), inactive(), withGithub()
+✓ CourseFactory   — forInstructor(), active(), inactive(), currentYear()
+✓ AssignmentFactory — published(), draft(), autoGradable(), pastDue(), upcoming()
+✓ EnrollmentFactory — active(), dropped(), completed(), passed(), failed()
+✓ SubmissionFactory — pending(), queued(), graded(), perfect(), failing(),
+                      manuallyGraded(), failed(), late(), retried()
+✓ DemoSeeder      — teacher@deveduhub.com, student1/2@deveduhub.com (pw: password)
+✓ ExtraStudentsSeeder — 10 students, 2 teachers, mixed submissions
+✓ StudentJourneyTest  — 20 test cases using factories
 ```
 
 ### Priority 2 — Production stability (2–3 days)
 ```
-3. Add database indexes:
+1. Add database indexes:
    - submissions: (student_id, submission_status, assignment_id)
    - courses: (is_active, instructor_id)
    - assignments: (course_id, is_published, due_date)
 
-4. Create AssignmentPolicy (move abort_unless → policy)
+2. Create AssignmentPolicy (move abort_unless → policy)
 
-5. Add rate limiting:
+3. Add rate limiting:
    - POST /submissions: 10/minute per user
    - POST /submissions/{id}/retry: 3/hour per user
 
-6. Create Laravel Dockerfile + docker-compose.yml:
+4. Create Laravel Dockerfile + docker-compose.yml:
    - php:8.2-fpm + Nginx + Redis + PostgreSQL
 ```
 
 ### Priority 3 — Frontend (2–3 weeks)
 ```
-7. Scaffold React app (Vite + React + TypeScript):
+5. Scaffold React app (Vite + React + TypeScript):
    src/
    ├── pages/
    │   ├── auth/          Login.tsx, Register.tsx
@@ -353,7 +356,7 @@ users ──< notifications (morphs)
    ├── api/               client.ts (axios + token)
    └── components/        CourseCard.tsx, RoleGuard.tsx
 
-8. Implement API integration (Axios):
+6. Implement API integration (Axios):
    - Auth flow (register → login → token storage)
    - Course listing + enrollment
    - Assignment submission form (GitHub URL input)
@@ -363,28 +366,28 @@ users ──< notifications (morphs)
 
 ### Priority 4 — Phase 3 foundations (1 week)
 ```
-9. Create Phase 3 migrations:
+7. Create Phase 3 migrations:
    - portfolios, projects, deployment_configs
    - github_webhooks, activity_logs
    - system_settings, course_resources
 
-10. GitHub webhook receiver:
-    POST /api/webhooks/github
-    - Verify X-Hub-Signature-256
-    - Auto-dispatch GradeSubmissionJob on push event
+8. GitHub webhook receiver:
+   POST /api/webhooks/github
+   - Verify X-Hub-Signature-256
+   - Auto-dispatch GradeSubmissionJob on push event
 ```
 
 ### Priority 5 — CI/CD (3 days)
 ```
-11. GitHub Actions pipeline:
-    - php artisan test (on pull_request)
-    - pytest test_grader.py (on pull_request)
-    - docker build (on main push)
-    - Deploy to staging (on tag)
+9. GitHub Actions pipeline:
+   - php artisan test (on pull_request)
+   - pytest test_grader.py (on pull_request)
+   - docker build (on main push)
+   - Deploy to staging (on tag)
 ```
 
 ---
 
 ## Summary
 
-DevEduHub has a solid, well-structured backend covering the full submission-to-grading pipeline across two services. The architecture is clean, the security model is correctly implemented (role-based access, Docker sandbox isolation), and the async queue integration is production-ready. The primary gap is the complete absence of a frontend — the API exists and is functional, but no user can interact with it without building the React layer. The second most urgent gap is model factories, which block all automated testing.
+DevEduHub has a solid, well-structured backend covering the full submission-to-grading pipeline across two services. The architecture is clean, the security model is correctly implemented (role-based access, Docker sandbox isolation), and the async queue integration is production-ready. The testing infrastructure is now complete — all 5 model factories with states, 3 seeders with predictable demo credentials, and 20 feature tests — unblocking the full test suite. The remaining backend gaps are minor (indexes, rate limiting, `AssignmentPolicy`). The primary gap is the complete absence of a frontend — the API exists and is functional, but no user can interact with it without building the React layer.
