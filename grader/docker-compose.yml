@@ -1,16 +1,15 @@
-version: "3.9"
-
 services:
   grader:
-    build: .
+    build:
+      context: .
+      args:
+        DOCKER_GID: "${DOCKER_GID}"   # 👈 سيتم تعيينه من host
     container_name: deveduhub_grader
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      # Sibling-container pattern: share Docker socket so grader
-      # can launch sandbox containers on the host Docker daemon
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket mount
       - /tmp:/tmp
     environment:
       - LOG_LEVEL=INFO

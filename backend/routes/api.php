@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Route;
 | Enrollments:   /api/enrollments/*
 |
 */
+Route::post('/submit', [SubmissionController::class, 'store']);
 
 // ── Public auth routes ────────────────────────────────────────────────────────
 Route::prefix('auth')->group(function () {

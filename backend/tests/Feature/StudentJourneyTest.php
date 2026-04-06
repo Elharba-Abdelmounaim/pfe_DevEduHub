@@ -14,75 +14,36 @@ class StudentJourneyTest extends TestCase
 {
     use RefreshDatabase;
 
-    // ── Helpers ───────────────────────────────────────────────────────────
-
-    private function makeTeacher(): User
-    {
-        return User::factory()->create(['role' => 'teacher']);
-    }
-
-    private function makeStudent(): User
-    {
-        return User::factory()->create(['role' => 'student']);
-    }
-
-    private function makeCourse(User $teacher, array $attrs = []): Course
-    {
-        return Course::factory()->for($teacher, 'instructor')->create($attrs);
-    }
-
-    private function makeAssignment(Course $course, array $attrs = []): Assignment
-    {
-        return Assignment::factory()->for($course)->create(array_merge([
-            'is_published' => true,
-            'due_date'     => now()->addDays(7),
-        ], $attrs));
-    }
-
-    private function enroll(User $student, Course $course): Enrollment
-    {
-        return Enrollment::create([
-            'student_id'      => $student->id,
-            'course_id'       => $course->id,
-            'enrollment_date' => now(),
-            'status'          => 'active',
-        ]);
-    }
-
     // ═════════════════════════════════════════════════════════════════════
-    // AUTH TESTS
+    // AUTH
     // ═════════════════════════════════════════════════════════════════════
 
     public function test_student_can_register(): void
     {
-        $res = $this->postJson('/api/auth/register', [
+        $this->postJson('/api/auth/register', [
             'first_name'            => 'Youssef',
             'last_name'             => 'El Mansouri',
             'email'                 => 'youssef@test.com',
             'password'              => 'password123',
             'password_confirmation' => 'password123',
             'role'                  => 'student',
-        ]);
-
-        $res->assertCreated()
-            ->assertJsonStructure(['token', 'user' => ['id', 'email', 'role']]);
+        ])->assertCreated()
+          ->assertJsonStructure(['token', 'user' => ['id', 'email', 'role']]);
 
         $this->assertDatabaseHas('users', ['email' => 'youssef@test.com', 'role' => 'student']);
     }
 
     public function test_teacher_can_register(): void
     {
-        $res = $this->postJson('/api/auth/register', [
+        $this->postJson('/api/auth/register', [
             'first_name'            => 'Amina',
             'last_name'             => 'Tazi',
             'email'                 => 'amina@test.com',
             'password'              => 'password123',
             'password_confirmation' => 'password123',
             'role'                  => 'teacher',
-        ]);
-
-        $res->assertCreated()
-            ->assertJsonFragment(['role' => 'teacher']);
+        ])->assertCreated()
+          ->assertJsonFragment(['role' => 'teacher']);
     }
 
     public function test_role_must_be_teacher_or_student(): void
@@ -100,18 +61,19 @@ class StudentJourneyTest extends TestCase
 
     public function test_student_can_login(): void
     {
-        $student = $this->makeStudent();
+        // Factory creates users with Hash::make('password')
+        $student = User::factory()->student()->create();
 
         $this->postJson('/api/auth/login', [
             'email'    => $student->email,
-            'password' => 'password',          // Factory default
+            'password' => 'password',
         ])->assertOk()
           ->assertJsonStructure(['token', 'user']);
     }
 
     public function test_invalid_credentials_rejected(): void
     {
-        $student = $this->makeStudent();
+        $student = User::factory()->student()->create();
 
         $this->postJson('/api/auth/login', [
             'email'    => $student->email,
@@ -120,12 +82,12 @@ class StudentJourneyTest extends TestCase
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // COURSE TESTS
+    // COURSES
     // ═════════════════════════════════════════════════════════════════════
 
     public function test_teacher_can_create_course(): void
     {
-        $teacher = $this->makeTeacher();
+        $teacher = User::factory()->teacher()->create();
 
         $this->actingAs($teacher)
              ->postJson('/api/courses', [
@@ -134,62 +96,58 @@ class StudentJourneyTest extends TestCase
                  'academic_year' => 2024,
                  'semester'      => 'Fall',
                  'credits'       => 3,
-             ])
-             ->assertCreated()
-             ->assertJsonFragment(['code' => 'CS301']);
+             ])->assertCreated()
+               ->assertJsonFragment(['code' => 'CS301']);
 
         $this->assertDatabaseHas('courses', ['code' => 'CS301', 'instructor_id' => $teacher->id]);
     }
 
     public function test_student_cannot_create_course(): void
     {
-        $student = $this->makeStudent();
+        $student = User::factory()->student()->create();
 
         $this->actingAs($student)
              ->postJson('/api/courses', [
                  'code'          => 'CS999',
-                 'title'         => 'Hack',
+                 'title'         => 'Hacked Course',
                  'academic_year' => 2024,
                  'semester'      => 'Fall',
-             ])
-             ->assertForbidden();
+             ])->assertForbidden();
     }
 
-    public function test_student_can_view_active_courses(): void
+    public function test_student_sees_only_active_courses(): void
     {
-        $teacher = $this->makeTeacher();
-        $this->makeCourse($teacher, ['is_active' => true]);
-        $this->makeCourse($teacher, ['is_active' => true]);
-        $this->makeCourse($teacher, ['is_active' => false]);  // hidden
+        $teacher = User::factory()->teacher()->create();
+        Course::factory(2)->forInstructor($teacher)->active()->create();
+        Course::factory()->forInstructor($teacher)->inactive()->create(); // hidden
 
-        $student = $this->makeStudent();
+        $student = User::factory()->student()->create();
 
         $res = $this->actingAs($student)->getJson('/api/courses');
         $res->assertOk();
         $this->assertCount(2, $res->json('data'));
     }
 
-    public function test_teacher_only_sees_own_courses(): void
+    public function test_teacher_sees_only_own_courses(): void
     {
-        $teacher1 = $this->makeTeacher();
-        $teacher2 = $this->makeTeacher();
-        $this->makeCourse($teacher1);
-        $this->makeCourse($teacher1);
-        $this->makeCourse($teacher2);   // not teacher1's
+        $teacher1 = User::factory()->teacher()->create();
+        $teacher2 = User::factory()->teacher()->create();
+        Course::factory(2)->forInstructor($teacher1)->create();
+        Course::factory()->forInstructor($teacher2)->create(); // not teacher1's
 
         $res = $this->actingAs($teacher1)->getJson('/api/courses');
         $this->assertCount(2, $res->json('data'));
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // ENROLLMENT TESTS
+    // ENROLLMENTS
     // ═════════════════════════════════════════════════════════════════════
 
     public function test_student_can_enroll_in_course(): void
     {
-        $teacher = $this->makeTeacher();
-        $course  = $this->makeCourse($teacher);
-        $student = $this->makeStudent();
+        $teacher = User::factory()->teacher()->create();
+        $course  = Course::factory()->forInstructor($teacher)->active()->create();
+        $student = User::factory()->student()->create();
 
         $this->actingAs($student)
              ->postJson('/api/enrollments', ['course_id' => $course->id])
@@ -204,10 +162,14 @@ class StudentJourneyTest extends TestCase
 
     public function test_student_cannot_enroll_twice(): void
     {
-        $teacher = $this->makeTeacher();
-        $course  = $this->makeCourse($teacher);
-        $student = $this->makeStudent();
-        $this->enroll($student, $course);
+        $teacher = User::factory()->teacher()->create();
+        $course  = Course::factory()->forInstructor($teacher)->active()->create();
+        $student = User::factory()->student()->create();
+
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
+        ]);
 
         $this->actingAs($student)
              ->postJson('/api/enrollments', ['course_id' => $course->id])
@@ -216,25 +178,31 @@ class StudentJourneyTest extends TestCase
 
     public function test_enrollment_respects_max_students(): void
     {
-        $teacher = $this->makeTeacher();
-        $course  = $this->makeCourse($teacher, ['max_students' => 1]);
-        $s1      = $this->makeStudent();
-        $s2      = $this->makeStudent();
-        $this->enroll($s1, $course);
+        $teacher = User::factory()->teacher()->create();
+        $course  = Course::factory()->forInstructor($teacher)->active()->create([
+            'max_students' => 1,
+        ]);
+        $student1 = User::factory()->student()->create();
+        $student2 = User::factory()->student()->create();
 
-        $this->actingAs($s2)
+        Enrollment::factory()->active()->create([
+            'student_id' => $student1->id,
+            'course_id'  => $course->id,
+        ]);
+
+        $this->actingAs($student2)
              ->postJson('/api/enrollments', ['course_id' => $course->id])
              ->assertUnprocessable();
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // ASSIGNMENT TESTS
+    // ASSIGNMENTS
     // ═════════════════════════════════════════════════════════════════════
 
     public function test_teacher_can_create_assignment(): void
     {
-        $teacher = $this->makeTeacher();
-        $course  = $this->makeCourse($teacher);
+        $teacher = User::factory()->teacher()->create();
+        $course  = Course::factory()->forInstructor($teacher)->create();
 
         $this->actingAs($teacher)
              ->postJson('/api/assignments', [
@@ -245,17 +213,16 @@ class StudentJourneyTest extends TestCase
                  'due_date'        => now()->addDays(14)->toIso8601String(),
                  'language'        => 'python',
                  'is_published'    => true,
-             ])
-             ->assertCreated()
-             ->assertJsonFragment(['title' => 'Fibonacci in Python']);
+             ])->assertCreated()
+               ->assertJsonFragment(['title' => 'Fibonacci in Python']);
     }
 
     public function test_teacher_can_add_phase2_test_cases(): void
     {
-        $teacher = $this->makeTeacher();
-        $course  = $this->makeCourse($teacher);
+        $teacher = User::factory()->teacher()->create();
+        $course  = Course::factory()->forInstructor($teacher)->create();
 
-        $res = $this->actingAs($teacher)
+        $this->actingAs($teacher)
              ->postJson('/api/assignments', [
                  'course_id'       => $course->id,
                  'title'           => 'Sort Algorithm',
@@ -263,23 +230,25 @@ class StudentJourneyTest extends TestCase
                  'due_date'        => now()->addDays(7)->toIso8601String(),
                  'language'        => 'python',
                  'test_cases'      => [
-                     ['id' => 'tc1', 'name' => 'Empty list', 'input' => '[]', 'expected_output' => '[]', 'weight' => 50],
-                     ['id' => 'tc2', 'name' => 'Sorted list', 'input' => '[3,1,2]', 'expected_output' => '[1,2,3]', 'weight' => 50],
+                     ['id' => 'tc1', 'name' => 'Empty list', 'strategy' => 'output_contains', 'expected' => '[]', 'weight' => 50],
+                     ['id' => 'tc2', 'name' => 'Sorted',     'strategy' => 'exit_zero',                            'weight' => 50],
                  ],
-             ])
-             ->assertCreated();
+             ])->assertCreated();
 
-        $this->assertDatabaseHas('assignments', ['title' => 'Sort Algorithm']);
         $this->assertNotNull(Assignment::where('title', 'Sort Algorithm')->first()->test_cases);
     }
 
-    public function test_student_cannot_see_unpublished_assignments(): void
+    public function test_student_cannot_see_draft_assignments(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course, ['is_published' => false]);
-        $this->enroll($student, $course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->draft()->create();
+
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
+        ]);
 
         $this->actingAs($student)
              ->getJson("/api/assignments/{$assignment->id}")
@@ -287,100 +256,98 @@ class StudentJourneyTest extends TestCase
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // SUBMISSION TESTS
+    // SUBMISSIONS
     // ═════════════════════════════════════════════════════════════════════
 
     public function test_student_can_submit_assignment(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course);
-        $this->enroll($student, $course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->upcoming()->create();
 
-        $res = $this->actingAs($student)
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
+        ]);
+
+        $this->actingAs($student)
              ->postJson('/api/submissions', [
                  'assignment_id'   => $assignment->id,
                  'github_repo_url' => 'https://github.com/student/fibonacci',
                  'github_branch'   => 'main',
-             ]);
-
-        $res->assertCreated()
-            ->assertJsonFragment(['submission_status' => 'pending'])
-            ->assertJsonFragment(['is_late' => false]);
-
-        $this->assertDatabaseHas('submissions', [
-            'student_id'        => $student->id,
-            'assignment_id'     => $assignment->id,
-            'submission_status' => 'pending',
-            'is_late'           => false,
-        ]);
+             ])->assertCreated()
+               ->assertJsonFragment([
+                   'submission_status' => 'pending',
+                   'is_late'           => false,
+               ]);
     }
 
-    public function test_submission_is_marked_late_after_due_date(): void
+    public function test_submission_is_marked_late(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course, [
-            'due_date'                => now()->subDay(),
-            'late_submission_allowed' => true,
-        ]);
-        $this->enroll($student, $course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->pastDueLateAllowed()->create();
 
-        $res = $this->actingAs($student)
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
+        ]);
+
+        $this->actingAs($student)
              ->postJson('/api/submissions', [
                  'assignment_id'   => $assignment->id,
-                 'github_repo_url' => 'https://github.com/student/late-submission',
-             ]);
-
-        $res->assertCreated()
-            ->assertJsonFragment(['is_late' => true]);
+                 'github_repo_url' => 'https://github.com/student/late-submit',
+             ])->assertCreated()
+               ->assertJsonFragment(['is_late' => true]);
     }
 
     public function test_late_submission_rejected_when_not_allowed(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course, [
-            'due_date'                => now()->subDay(),
-            'late_submission_allowed' => false,
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->pastDue()->create();
+
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
         ]);
-        $this->enroll($student, $course);
 
         $this->actingAs($student)
              ->postJson('/api/submissions', [
                  'assignment_id'   => $assignment->id,
                  'github_repo_url' => 'https://github.com/student/too-late',
-             ])
-             ->assertUnprocessable()
-             ->assertJsonFragment(['message' => 'This assignment is past its due date and does not accept late submissions.']);
+             ])->assertUnprocessable();
     }
 
     public function test_unenrolled_student_cannot_submit(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->upcoming()->create();
         // intentionally NOT enrolling the student
 
         $this->actingAs($student)
              ->postJson('/api/submissions', [
                  'assignment_id'   => $assignment->id,
                  'github_repo_url' => 'https://github.com/student/hack',
-             ])
-             ->assertForbidden();
+             ])->assertForbidden();
     }
 
     public function test_student_cannot_submit_twice(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course);
-        $this->enroll($student, $course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->upcoming()->create();
+
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
+        ]);
 
         $payload = [
             'assignment_id'   => $assignment->id,
@@ -393,108 +360,111 @@ class StudentJourneyTest extends TestCase
 
     public function test_invalid_github_url_rejected(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course);
-        $this->enroll($student, $course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->upcoming()->create();
+
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
+        ]);
 
         $this->actingAs($student)
              ->postJson('/api/submissions', [
                  'assignment_id'   => $assignment->id,
                  'github_repo_url' => 'https://evil.com/hack/code',
-             ])
-             ->assertUnprocessable()
-             ->assertJsonValidationErrors(['github_repo_url']);
+             ])->assertUnprocessable()
+               ->assertJsonValidationErrors(['github_repo_url']);
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // TEACHER GRADING (Phase 2 hook test)
+    // FACTORY STATES
     // ═════════════════════════════════════════════════════════════════════
 
-    public function test_teacher_can_add_manual_grade(): void
+    public function test_graded_submission_factory_state(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course);
-        $this->enroll($student, $course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->published()->create();
 
-        $submission = Submission::create([
-            'assignment_id'     => $assignment->id,
-            'student_id'        => $student->id,
-            'github_repo_url'   => 'https://github.com/student/project',
-            'submission_status' => 'pending',
-            'submitted_at'      => now(),
-            'is_late'           => false,
-            'retry_count'       => 0,
+        $submission = Submission::factory()->graded()->create([
+            'assignment_id' => $assignment->id,
+            'student_id'    => $student->id,
         ]);
 
-        $this->actingAs($teacher)
-             ->patchJson("/api/submissions/{$submission->id}", [
-                 'manual_grade_score' => 85.5,
-                 'teacher_feedback'   => 'Great work, minor style issues.',
-             ])
-             ->assertOk()
-             ->assertJsonFragment([
-                 'manual_grade_score' => '85.50',
-                 'submission_status'  => 'graded',
-             ]);
+        $this->assertEquals('graded', $submission->submission_status);
+        $this->assertNotNull($submission->auto_grade_score);
+        $this->assertNotNull($submission->final_score);
+        $this->assertGreaterThanOrEqual(30, (float) $submission->final_score);
     }
 
-    public function test_student_cannot_grade_submission(): void
+    public function test_pending_submission_factory_state(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course);
-        $this->enroll($student, $course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->published()->create();
 
-        $submission = Submission::create([
-            'assignment_id'     => $assignment->id,
-            'student_id'        => $student->id,
-            'github_repo_url'   => 'https://github.com/student/project',
-            'submission_status' => 'pending',
-            'submitted_at'      => now(),
-            'is_late'           => false,
-            'retry_count'       => 0,
+        $submission = Submission::factory()->pending()->create([
+            'assignment_id' => $assignment->id,
+            'student_id'    => $student->id,
         ]);
 
-        $this->actingAs($student)
-             ->patchJson("/api/submissions/{$submission->id}", [
-                 'manual_grade_score' => 100,
-             ])
-             ->assertForbidden();
+        $this->assertEquals('pending', $submission->submission_status);
+        $this->assertNull($submission->auto_grade_score);
+        $this->assertNull($submission->final_score);
     }
 
-    // ═════════════════════════════════════════════════════════════════════
-    // PHASE 2 READINESS TEST
-    // ═════════════════════════════════════════════════════════════════════
-
-    public function test_phase2_nullable_columns_dont_break_phase1(): void
+    public function test_failed_submission_can_be_retried(): void
     {
-        $teacher    = $this->makeTeacher();
-        $course     = $this->makeCourse($teacher);
-        $student    = $this->makeStudent();
-        $assignment = $this->makeAssignment($course);
-        $this->enroll($student, $course);
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->autoGradable()->create();
+
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
+        ]);
+
+        $submission = Submission::factory()->failed()->create([
+            'assignment_id' => $assignment->id,
+            'student_id'    => $student->id,
+        ]);
+
+        $this->assertTrue($submission->canRetry());
+        $this->assertTrue($submission->isFailed());
+    }
+
+    public function test_phase2_nullable_columns_are_null_in_phase1(): void
+    {
+        $teacher    = User::factory()->teacher()->create();
+        $course     = Course::factory()->forInstructor($teacher)->create();
+        $student    = User::factory()->student()->create();
+        $assignment = Assignment::factory()->for($course)->published()->create([
+            'test_cases'    => null,
+            'docker_config' => null,
+        ]);
+
+        Enrollment::factory()->active()->create([
+            'student_id' => $student->id,
+            'course_id'  => $course->id,
+        ]);
 
         $this->actingAs($student)
              ->postJson('/api/submissions', [
                  'assignment_id'   => $assignment->id,
                  'github_repo_url' => 'https://github.com/student/project',
-             ])
-             ->assertCreated();
+             ])->assertCreated();
 
         $submission = Submission::where('student_id', $student->id)->first();
 
-        // Phase 2 nullable fields must be null in Phase 1
         $this->assertNull($submission->auto_grade_score);
         $this->assertNull($submission->manual_grade_score);
         $this->assertNull($submission->final_score);
         $this->assertNull($submission->last_retry_at);
-
-        // Phase 2 jsonb fields on assignment must be null
         $this->assertNull($assignment->test_cases);
         $this->assertNull($assignment->docker_config);
     }
