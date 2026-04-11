@@ -15,12 +15,12 @@ class AssignmentController extends Controller
     // ── GET /api/courses/{course}/assignments ─────────────────────────────
     public function index(Request $request, Course $course): AnonymousResourceCollection
     {
-        $user = $request->user();
+        $this->authorize('viewAny', Assignment::class);
 
         $query = $course->assignments()->orderBy('due_date');
 
         // Students only see published assignments
-        if ($user->isStudent()) {
+        if ($request->user()->isStudent()) {
             $query->published();
         }
 
@@ -30,14 +30,11 @@ class AssignmentController extends Controller
     // ── POST /api/assignments ─────────────────────────────────────────────
     public function store(StoreAssignmentRequest $request): JsonResponse
     {
-        $course = Course::findOrFail($request->course_id);
+        $course     = Course::findOrFail($request->course_id);
+        $assignment = new Assignment(['course_id' => $course->id]);
+        $assignment->setRelation('course', $course);
 
-        // Only the course instructor can add assignments
-        abort_unless(
-            $course->instructor_id === $request->user()->id,
-            403,
-            'Only the course instructor can create assignments.'
-        );
+        $this->authorize('create', $assignment);
 
         $assignment = $course->assignments()->create($request->validated());
 
@@ -47,12 +44,7 @@ class AssignmentController extends Controller
     // ── GET /api/assignments/{assignment} ─────────────────────────────────
     public function show(Request $request, Assignment $assignment): JsonResponse
     {
-        $user = $request->user();
-
-        // Students only see published assignments they are enrolled in
-        if ($user->isStudent()) {
-            abort_unless($assignment->is_published, 404, 'Assignment not found.');
-        }
+        $this->authorize('view', $assignment);
 
         $assignment->load('course:id,title,code,instructor_id');
 
@@ -62,11 +54,7 @@ class AssignmentController extends Controller
     // ── PUT /api/assignments/{assignment} ─────────────────────────────────
     public function update(StoreAssignmentRequest $request, Assignment $assignment): JsonResponse
     {
-        abort_unless(
-            $assignment->course->instructor_id === $request->user()->id,
-            403,
-            'Only the course instructor can update assignments.'
-        );
+        $this->authorize('update', $assignment);
 
         $assignment->update($request->validated());
 
@@ -74,23 +62,26 @@ class AssignmentController extends Controller
     }
 
     // ── DELETE /api/assignments/{assignment} ──────────────────────────────
-    public function destroy(Request $request, Assignment $assignment): JsonResponse
+    public function destroy(Assignment $assignment): JsonResponse
     {
-        abort_unless(
-            $assignment->course->instructor_id === $request->user()->id,
-            403,
-            'Only the course instructor can delete assignments.'
-        );
-
-        // Prevent deletion if submissions exist
-        if ($assignment->submissions()->exists()) {
-            return response()->json([
-                'message' => 'Cannot delete assignment with existing submissions.',
-            ], 422);
-        }
+        $this->authorize('delete', $assignment);
 
         $assignment->delete();
 
         return response()->json(['message' => 'Assignment deleted.']);
+    }
+
+    // ── PATCH /api/assignments/{assignment}/publish ────────────────────────
+    // Dedicated publish / unpublish toggle
+    public function togglePublish(Request $request, Assignment $assignment): JsonResponse
+    {
+        $this->authorize('publish', $assignment);
+
+        $assignment->update(['is_published' => ! $assignment->is_published]);
+
+        return response()->json([
+            'message'      => $assignment->is_published ? 'Assignment published.' : 'Assignment unpublished.',
+            'is_published' => $assignment->is_published,
+        ]);
     }
 }

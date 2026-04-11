@@ -1,0 +1,57 @@
+version: "3.9"
+
+# ── DevEduHub — Development Overrides ────────────────────────────────────────
+#
+# Extends docker-compose.yml for local development:
+#   - Debug mode on
+#   - Volume mounts for live code reload (no image rebuild needed)
+#   - Mailpit for email catching
+#   - Expose extra ports for debugging
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+
+  app:
+    build:
+      target: deps       # use deps stage only for dev (skip opcache tuning)
+    environment:
+      APP_ENV:   local
+      APP_DEBUG: "true"
+    volumes:
+      - .:/var/www/html   # live code mount — changes reflect immediately
+
+  nginx:
+    ports:
+      - "8080:80"
+
+  db:
+    ports:
+      - "5432:5432"       # expose for TablePlus / psql access
+
+  redis:
+    ports:
+      - "6379:6379"       # expose for redis-cli / RedisInsight
+
+  grader:
+    ports:
+      - "8000:8000"
+    environment:
+      LOG_LEVEL: DEBUG
+
+  # ── Mailpit — catches all outgoing email in dev ───────────────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: deveduhub_mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"   # Web UI: http://localhost:8025
+      - "1025:1025"   # SMTP
+    networks:
+      - deveduhub_net
+
+  # Disable the scheduler in dev (run manually when needed)
+  scheduler:
+    profiles:
+      - scheduler      # only starts with: docker compose --profile scheduler up

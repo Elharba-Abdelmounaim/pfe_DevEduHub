@@ -1,0 +1,275 @@
+version: "3.9"
+
+# ── DevEduHub — Full Stack ─────────────────────────────────────────────────────
+#
+# Services:
+#   app      — Laravel PHP-FPM
+#   nginx    — Web server / reverse proxy
+#   db       — PostgreSQL 15
+#   redis    — Queue driver + cache
+#   grader   — Python FastAPI auto-grading service
+#   worker   — Laravel queue worker (grading queue)
+#   notifier — Laravel queue worker (notifications queue)
+#   scheduler — Laravel task scheduler (cron)
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose up -d
+#   docker compose exec app php artisan migrate --seed
+#
+# Access:
+#   Laravel API:   http://localhost:8080
+#   Grader API:    http://localhost:8000
+#   PostgreSQL:    localhost:5432
+#   Redis:         localhost:6379
+
+services:
+
+  # ── Laravel App (PHP-FPM) ────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.laravel
+    container_name: deveduhub_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+      - laravel_storage:/var/www/html/storage
+    environment:
+      APP_ENV:              ${APP_ENV:-production}
+      APP_KEY:              ${APP_KEY}
+      APP_DEBUG:            ${APP_DEBUG:-false}
+      DB_CONNECTION:        pgsql
+      DB_HOST:              db
+      DB_PORT:              5432
+      DB_DATABASE:          ${DB_DATABASE:-deveduhub}
+      DB_USERNAME:          ${DB_USERNAME:-postgres}
+      DB_PASSWORD:          ${DB_PASSWORD}
+      REDIS_HOST:           redis
+      REDIS_PORT:           6379
+      QUEUE_CONNECTION:     redis
+      GRADER_URL:           http://grader:8000
+      GRADER_TIMEOUT:       ${GRADER_TIMEOUT:-150}
+      MAIL_MAILER:          ${MAIL_MAILER:-log}
+      MAIL_HOST:            ${MAIL_HOST:-mailpit}
+      MAIL_PORT:            ${MAIL_PORT:-1025}
+      MAIL_FROM_ADDRESS:    ${MAIL_FROM_ADDRESS:-noreply@deveduhub.com}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - deveduhub_net
+    healthcheck:
+      test: ["CMD", "php-fpm", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Nginx ────────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: deveduhub_nginx
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      - .:/var/www/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - laravel_storage:/var/www/html/storage:ro
+    depends_on:
+      - app
+    networks:
+      - deveduhub_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: deveduhub_db
+    restart: unless-stopped
+    ports:
+      - "${DB_PORT_EXTERNAL:-5432}:5432"
+    environment:
+      POSTGRES_DB:       ${DB_DATABASE:-deveduhub}
+      POSTGRES_USER:     ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - deveduhub_net
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DB_USERNAME:-postgres}", "-d", "${DB_DATABASE:-deveduhub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: deveduhub_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT_EXTERNAL:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - deveduhub_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Python Grader Service ────────────────────────────────────────────────
+  grader:
+    build:
+      context: ./grader
+      dockerfile: Dockerfile
+    container_name: deveduhub_grader
+    restart: unless-stopped
+    ports:
+      - "${GRADER_PORT:-8000}:8000"
+    volumes:
+      # Sibling-container pattern: share Docker socket with host daemon
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - deveduhub_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ── Queue Worker: grading (long timeout — Docker builds can be slow) ─────
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.laravel
+    container_name: deveduhub_worker
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: >
+      php artisan queue:work redis
+        --queue=grading
+        --timeout=180
+        --tries=3
+        --sleep=3
+        --max-jobs=500
+        --max-time=3600
+    volumes:
+      - .:/var/www/html
+      - laravel_storage:/var/www/html/storage
+    environment:
+      APP_ENV:          ${APP_ENV:-production}
+      APP_KEY:          ${APP_KEY}
+      DB_HOST:          db
+      DB_DATABASE:      ${DB_DATABASE:-deveduhub}
+      DB_USERNAME:      ${DB_USERNAME:-postgres}
+      DB_PASSWORD:      ${DB_PASSWORD}
+      REDIS_HOST:       redis
+      QUEUE_CONNECTION: redis
+      GRADER_URL:       http://grader:8000
+      GRADER_TIMEOUT:   ${GRADER_TIMEOUT:-150}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      grader:
+        condition: service_healthy
+    networks:
+      - deveduhub_net
+
+  # ── Queue Worker: notifications (fast, low timeout) ──────────────────────
+  notifier:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.laravel
+    container_name: deveduhub_notifier
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: >
+      php artisan queue:work redis
+        --queue=notifications
+        --timeout=30
+        --tries=5
+        --sleep=3
+        --max-jobs=1000
+        --max-time=3600
+    volumes:
+      - .:/var/www/html
+      - laravel_storage:/var/www/html/storage
+    environment:
+      APP_ENV:          ${APP_ENV:-production}
+      APP_KEY:          ${APP_KEY}
+      DB_HOST:          db
+      DB_DATABASE:      ${DB_DATABASE:-deveduhub}
+      DB_USERNAME:      ${DB_USERNAME:-postgres}
+      DB_PASSWORD:      ${DB_PASSWORD}
+      REDIS_HOST:       redis
+      QUEUE_CONNECTION: redis
+      MAIL_MAILER:      ${MAIL_MAILER:-log}
+      MAIL_HOST:        ${MAIL_HOST:-mailpit}
+      MAIL_PORT:        ${MAIL_PORT:-1025}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-noreply@deveduhub.com}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - deveduhub_net
+
+  # ── Task Scheduler ────────────────────────────────────────────────────────
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.laravel
+    container_name: deveduhub_scheduler
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: >
+      sh -c "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"
+    volumes:
+      - .:/var/www/html
+      - laravel_storage:/var/www/html/storage
+    environment:
+      APP_ENV:     ${APP_ENV:-production}
+      APP_KEY:     ${APP_KEY}
+      DB_HOST:     db
+      DB_DATABASE: ${DB_DATABASE:-deveduhub}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST:  redis
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - deveduhub_net
+
+volumes:
+  pg_data:
+    driver: local
+  redis_data:
+    driver: local
+  laravel_storage:
+    driver: local
+
+networks:
+  deveduhub_net:
+    driver: bridge

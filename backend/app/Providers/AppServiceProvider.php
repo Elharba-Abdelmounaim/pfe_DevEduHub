@@ -4,32 +4,25 @@ namespace App\Providers;
 
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Gate;
 
 class AppServiceProvider extends AuthServiceProvider
 {
     /**
      * Policy mappings for the application.
-     * Must be a property of AuthServiceProvider, not ServiceProvider.
      */
     protected $policies = [
-        \App\Models\Course::class => \App\Policies\CoursePolicy::class,
+        \App\Models\Course::class     => \App\Policies\CoursePolicy::class,
+        \App\Models\Assignment::class => \App\Policies\AssignmentPolicy::class,
     ];
 
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
         //
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
-        // Register policies declared in $policies above
+        // Register all policies declared in $policies
         $this->registerPolicies();
 
         // Enable pgcrypto so gen_random_uuid() works in migrations
