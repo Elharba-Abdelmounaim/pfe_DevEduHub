@@ -68,10 +68,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('enrollments/{enrollment}',  [EnrollmentController::class, 'destroy']);
 
     // ── Notifications ─────────────────────────────────────────────────────
-    Route::prefix('notifications')->group(function () {
-        Route::get('/',           [NotificationController::class, 'index']);
-        Route::get('unread',      [NotificationController::class, 'unread']);
-        Route::patch('read-all',  [NotificationController::class, 'markAllRead']);
-        Route::patch('{id}/read', [NotificationController::class, 'markRead']);
-    });
+    
+
+    Route::get('/health', function () {
+    return response()->json(['status' => 'ok']);
+});
 });

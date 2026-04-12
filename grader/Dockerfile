@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create docker group with host GID, then create grader user
-RUN groupadd -g ${DOCKER_GID} docker 2>/dev/null || true && \
+RUN getent group docker || groupadd docker && \
     useradd -m -u 1000 -G docker grader
 
 WORKDIR /app

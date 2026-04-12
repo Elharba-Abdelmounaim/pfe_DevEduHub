@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        DOCKER_GID: "${DOCKER_GID}"   # 👈 سيتم تعيينه من host
+        DOCKER_GID: "${DOCKER_GID}"   
     container_name: deveduhub_grader
     restart: unless-stopped
     ports:

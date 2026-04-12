@@ -99,7 +99,7 @@ services:
     environment:
       POSTGRES_DB:       ${DB_DATABASE:-deveduhub}
       POSTGRES_USER:     ${DB_USERNAME:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: postgres
     volumes:
       - pg_data:/var/lib/postgresql/data
     networks:
@@ -132,7 +132,7 @@ services:
   # ── Python Grader Service ────────────────────────────────────────────────
   grader:
     build:
-      context: ./grader
+      context: ../grader
       dockerfile: Dockerfile
     container_name: deveduhub_grader
     restart: unless-stopped
