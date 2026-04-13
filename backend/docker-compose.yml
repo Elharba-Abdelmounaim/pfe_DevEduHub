@@ -30,6 +30,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.laravel
+    command: php-fpm
     container_name: deveduhub_app
     restart: unless-stopped
     working_dir: /var/www/html
