@@ -11,7 +11,7 @@ return new class extends Migration
     {
         Schema::create('courses', function (Blueprint $table) {
             // ── Primary key ───────────────────────────────────────────────
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
  
             // ── Ownership ─────────────────────────────────────────────────
             $table->foreignUuid('instructor_id')

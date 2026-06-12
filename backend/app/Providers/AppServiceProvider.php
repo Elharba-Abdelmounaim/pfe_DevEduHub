@@ -22,10 +22,11 @@ class AppServiceProvider extends AuthServiceProvider
 
     public function boot(): void
     {
+        // DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
         // Register all policies declared in $policies
         $this->registerPolicies();
 
         // Enable pgcrypto so gen_random_uuid() works in migrations
-        DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+       // DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
     }
 }
